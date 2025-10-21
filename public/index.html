@@ -1,0 +1,242 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Perp Sim • BTC/ETH</title>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root{--bg:#0b0b12;--panel:#0f1320;--border:#252a3a;--ink:#e5e7eb;--muted:#9aa3b2;--good:#16a34a;--bad:#ef4444;--accent:#f59e0b}
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--ink);font:13px ui-monospace,Menlo,Consolas,monospace}
+    .layout{display:grid;grid-template-columns:260px 1fr 360px;grid-template-rows:auto 1fr;grid-template-areas:"nav head head" "nav main side";height:100%}
+    header{grid-area:head;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:#111118}
+    h1{margin:0;font-size:14px;color:#a78bfa}
+    .nav{grid-area:nav;border-right:1px solid var(--border);padding:8px;background:#0d1020;overflow:auto}
+    .main{grid-area:main;padding:10px;overflow:auto}
+    .side{grid-area:side;border-left:1px solid var(--border);padding:10px;background:#0d1020;overflow:auto}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    input,button,select{background:#0e1220;border:1px solid var(--border);color:var(--ink);padding:6px 8px;border-radius:8px}
+    button{cursor:pointer}
+    table{width:100%;border-collapse:collapse} th,td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:left}
+    .num{text-align:right}
+    .good{color:var(--good)} .bad{color:var(--bad)}
+    .muted{color:var(--muted)}
+    .pill{display:inline-block;padding:2px 6px;border-radius:10px;border:1px solid var(--border);background:#0b0f1d}
+    .depth{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .ob{height:260px;overflow:auto}
+    .ob table td{font-size:12px}
+    .mid{color:var(--accent);font-weight:700;text-align:center;padding:4px 0}
+    .tape{height:220px;overflow:auto;font-size:12px}
+    #tv{height:420px; width:100%}
+    .market-row{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:8px}
+    .market-row:hover{background:#0f1320}
+    .active{background:#0f1320}
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <div class="row">
+      <h1>Percolator • Perp Sim</h1>
+      <span id="pair" class="pill">BTC-PERP</span>
+      <span id="last" class="pill">-</span>
+      <span id="bbo" class="pill">BBO: - / -</span>
+    </div>
+    <div class="row">
+      <span class="muted">Equity:</span><b id="eq">-</b>
+      <span class="muted">Used:</span><b id="used">-</b>
+      <span class="muted">MR:</span><b id="mr">-</b>
+    </div>
+  </header>
+
+  <!-- Left: Markets -->
+  <aside class="nav">
+    <div class="card">
+      <b>Markets</b>
+      <div id="markets"></div>
+    </div>
+    <div class="card">
+      <b>Account</b>
+      <table>
+        <tbody>
+          <tr><td>Cash</td><td class="num" id="cash">-</td></tr>
+          <tr><td>Equity</td><td class="num" id="equity">-</td></tr>
+          <tr><td>Used</td><td class="num" id="used2">-</td></tr>
+          <tr><td>MR</td><td class="num" id="mr2">-</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </aside>
+
+  <!-- Center: Chart + tape -->
+  <main class="main">
+    <div class="card"><div id="tv"></div></div>
+    <div class="card">
+      <b>Last Trades</b>
+      <div class="tape">
+        <table>
+          <thead><tr><th>Side</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Time</th></tr></thead>
+          <tbody id="tape"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Right: Order book + Order form -->
+  <aside class="side">
+    <div class="card">
+      <b>Order Book</b>
+      <div class="depth">
+        <div>
+          <div class="muted">Asks</div>
+          <div class="ob"><table id="asks"><tbody></tbody></table></div>
+        </div>
+        <div>
+          <div class="muted">Bids</div>
+          <div class="ob"><table id="bids"><tbody></tbody></table></div>
+        </div>
+      </div>
+      <div class="mid" id="mid">-</div>
+    </div>
+
+    <div class="card">
+      <b>Order</b>
+      <div class="row" style="margin-top:6px">
+        <select id="side">
+          <option value="buy">Buy / Long</option>
+          <option value="sell">Sell / Short</option>
+        </select>
+        <select id="qty">
+          <option value="0.001">0.001</option>
+          <option value="0.005">0.005</option>
+          <option value="0.01">0.01</option>
+        </select>
+        <button id="marketBtn">Market</button>
+      </div>
+      <div class="muted" style="margin-top:8px">Market orders only (sim). Limit UI coming later.</div>
+      <div style="margin-top:8px">
+        <div class="muted">Position</div>
+        <table><tbody id="pos"></tbody></table>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+  const fmt = (n, d=2) => (n===null||n===undefined||isNaN(n))?'-':Number(n).toLocaleString(undefined,{maximumFractionDigits:d});
+  let symbol = "BTCUSDT";
+
+  // Markets sidebar
+  const mk = document.getElementById('markets');
+  const marketList = [
+    { sym:"BTCUSDT", label:"BTC 100x"},
+    { sym:"ETHUSDT", label:"ETH 100x"},
+  ];
+  function renderMarkets(active){
+    mk.innerHTML = "";
+    marketList.forEach(m=>{
+      const div = document.createElement('div');
+      div.className = 'market-row' + (active===m.sym?' active':'');
+      div.innerHTML = `<span>${m.label}</span><span id="p_${m.sym}">-</span>`;
+      div.onclick = () => { symbol = m.sym; pair.textContent = m.sym==='BTCUSDT'?'BTC-PERP':'ETH-PERP'; loadCandles(); updateAll(); renderMarkets(symbol); };
+      mk.appendChild(div);
+    });
+  }
+  renderMarkets(symbol);
+
+  // Lightweight Charts (autoSize + dark theme)
+  const container = document.getElementById('tv');
+  const chart = LightweightCharts.createChart(container, {
+    autoSize: true,
+    layout:{background:{type:'solid', color:'#0f1320'}, textColor:'#e5e7eb'},
+    grid:{vertLines:{color:'#161b2c'}, horzLines:{color:'#161b2c'}},
+    rightPriceScale:{borderColor:'#252a3a'},
+    timeScale:{borderColor:'#252a3a'}
+  });
+  const series = chart.addCandlestickSeries({
+    upColor:'#16a34a', downColor:'#ef4444',
+    borderVisible:false, wickUpColor:'#16a34a', wickDownColor:'#ef4444'
+  });
+
+  async function loadCandles(){
+    const r = await fetch(`/api/candles?symbol=${symbol}`);
+    const data = await r.json();
+    const c = data.map(d=>({ time: Math.floor(d.t/1000), open:d.o, high:d.h, low:d.l, close:d.c }));
+    if (c.length) { series.setData(c); chart.timeScale().fitContent(); }
+  }
+  loadCandles();
+
+  // Order book + tape polling
+  async function pullOB(){
+    const r = await fetch(`/api/orderbook?symbol=${symbol}`); const ob = await r.json();
+    const bidsEl = document.querySelector('#bids tbody');
+    const asksEl = document.querySelector('#asks tbody');
+    bidsEl.innerHTML = ""; asksEl.innerHTML = "";
+    let bestBid = null, bestAsk = null;
+    ob.bids.slice().reverse().forEach(lv=>{ if (!bestBid || lv.p>bestBid) bestBid=lv.p;
+      bidsEl.insertAdjacentHTML('beforeend', `<tr><td class="num">${fmt(lv.p)}</td><td class="num">${fmt(lv.q,4)}</td></tr>`); });
+    ob.asks.forEach(lv=>{ if (!bestAsk || lv.p<bestAsk) bestAsk=lv.p;
+      asksEl.insertAdjacentHTML('beforeend', `<tr><td class="num">${fmt(lv.p)}</td><td class="num">${fmt(lv.q,4)}</td></tr>`); });
+    mid.textContent = ob.mid ? `Mid ${fmt(ob.mid,2)}` : '-';
+    bbo.textContent = (bestBid&&bestAsk) ? `BBO: ${fmt(bestBid,2)} / ${fmt(bestAsk,2)}` : 'BBO: - / -';
+  }
+  function renderTrades(rows){
+    const el = document.getElementById('tape');
+    el.innerHTML = "";
+    rows.forEach(t=>{
+      const c = t.side==='buy'?'good':'bad';
+      el.insertAdjacentHTML('beforeend',
+        `<tr>
+           <td class="${c}" style="text-transform:uppercase">${t.side}</td>
+           <td class="num">${fmt(t.px,2)}</td>
+           <td class="num">${fmt(t.qty,6)}</td>
+           <td class="num muted">${new Date(t.ts).toLocaleTimeString()}</td>
+         </tr>`);
+    });
+  }
+  async function pullTrades(){ const r = await fetch(`/api/trades?symbol=${symbol}`); renderTrades(await r.json()); }
+
+  async function updateAll(){ await pullOB(); await pullTrades(); }
+  setInterval(updateAll, 1500); updateAll();
+
+  // SSE live portfolio + price
+  const es = new EventSource("/events");
+  es.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "snapshot") {
+      const s = msg.data;
+      document.getElementById('p_BTCUSDT').textContent = fmt(s.prices.BTCUSDT,2);
+      document.getElementById('p_ETHUSDT').textContent = fmt(s.prices.ETHUSDT,2);
+      last.textContent = `Last ${fmt(s.prices[symbol],2)}`;
+      eq.textContent = fmt(s.equity,2);
+      used.textContent = fmt(s.usedMargin,2);
+      mr.textContent = s.marginRatio===Infinity?'∞':fmt(s.marginRatio,2);
+      cash.textContent = fmt(s.cash,2);
+      equity.textContent = fmt(s.equity,2);
+      used2.textContent = fmt(s.usedMargin,2);
+      mr2.textContent = s.marginRatio===Infinity?'∞':fmt(s.marginRatio,2);
+
+      const p = s.positions[symbol];
+      const posEl = document.getElementById('pos');
+      posEl.innerHTML = `
+        <tr><td>Qty</td><td class="num">${fmt(p.qty,6)}</td></tr>
+        <tr><td>Entry</td><td class="num">${fmt(p.entry,2)}</td></tr>
+        <tr><td>Notional</td><td class="num">${fmt(p.notional,2)}</td></tr>
+        <tr><td>uPnL</td><td class="num ${p.upnl>=0?'good':'bad'}">${fmt(p.upnl,2)}</td></tr>
+        <tr><td>Est. Liq</td><td class="num">${p.liq?fmt(p.liq,2):'-'}</td></tr>`;
+    }
+    if (msg.type === "trade" && msg.data.symbol === symbol) pullTrades();
+  };
+
+  // Market order
+  document.getElementById('marketBtn').onclick = async () => {
+    const side = document.getElementById('side').value;
+    const qty  = Number(document.getElementById('qty').value);
+    const r = await fetch('/api/order', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol, side, qty }) });
+    const data = await r.json(); if (!data.ok) alert(data.error);
+  };
+</script>
+</body>
+</html>
